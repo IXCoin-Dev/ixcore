@@ -478,9 +478,7 @@ getunotrieinfo (const json_spirit::Array& params, bool fHelp)
       );
 
   json_spirit::Object res;
-
   LOCK (cs_main);
-  pcoinsTip->Flush ();
 
   if (pcoinsTip->HasUnoTrie ())
     {
