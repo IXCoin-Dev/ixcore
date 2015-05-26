@@ -156,6 +156,7 @@ name_new (const json_spirit::Array& params, bool fHelp)
         "name_new \"name\"\n"
         "\nStart registration of the given name.  Must be followed up with"
         " name_firstupdate to finish the registration.\n"
+        + HelpRequiringPassphrase () +
         "\nArguments:\n"
         "1. \"name\"          (string, required) the name to register\n"
         "\nResult:\n"
@@ -223,6 +224,7 @@ name_firstupdate (const json_spirit::Array& params, bool fHelp)
         "name_firstupdate \"name\" \"rand\" \"tx\" \"value\" (\"toaddress\")\n"
         "\nFinish the registration of a name.  Depends on name_new being"
         " already issued.\n"
+        + HelpRequiringPassphrase () +
         "\nArguments:\n"
         "1. \"name\"          (string, required) the name to register\n"
         "2. \"rand\"          (string, required) the rand value of name_new\n"
@@ -335,6 +337,7 @@ name_update (const json_spirit::Array& params, bool fHelp)
     throw std::runtime_error (
         "name_update \"name\" \"value\" (\"toaddress\")\n"
         "\nUpdate a name and possibly transfer it.\n"
+        + HelpRequiringPassphrase () +
         "\nArguments:\n"
         "1. \"name\"          (string, required) the name to update\n"
         "4. \"value\"         (string, required) value for the name\n"
@@ -412,6 +415,86 @@ name_update (const json_spirit::Array& params, bool fHelp)
 
   if (usedKey)
     keyName.KeepKey ();
+
+  return wtx.GetHash ().GetHex ();
+}
+
+/* ************************************************************************** */
+
+json_spirit::Value
+sendtoname (const json_spirit::Array& params, bool fHelp)
+{
+  if (!EnsureWalletIsAvailable (fHelp))
+    return json_spirit::Value::null;
+  
+  if (fHelp || params.size () < 2 || params.size () > 5)
+    throw std::runtime_error (
+        "sendtoname \"name\" amount ( \"comment\" \"comment-to\" subtractfeefromamount )\n"
+        "\nSend an amount to the owner of a name. "
+        " The amount is a real and is rounded to the nearest 0.00000001.\n"
+        "\nIt is an error if the name is expired.\n"
+        + HelpRequiringPassphrase () +
+        "\nArguments:\n"
+        "1. \"name\"        (string, required) The name to send to.\n"
+        "2. \"amount\"      (numeric, required) The amount in btc to send. eg 0.1\n"
+        "3. \"comment\"     (string, optional) A comment used to store what the transaction is for. \n"
+        "                             This is not part of the transaction, just kept in your wallet.\n"
+        "4. \"comment-to\"  (string, optional) A comment to store the name of the person or organization \n"
+        "                             to which you're sending the transaction. This is not part of the \n"
+        "                             transaction, just kept in your wallet.\n"
+        "5. subtractfeefromamount  (boolean, optional, default=false) The fee will be deducted from the amount being sent.\n"
+        "                             The recipient will receive less bitcoins than you enter in the amount field.\n"
+        "\nResult:\n"
+        "\"transactionid\"  (string) The transaction id.\n"
+        "\nExamples:\n"
+        + HelpExampleCli ("sendtoname", "\"foobar\" 0.1")
+        + HelpExampleCli ("sendtoname", "\"foobar\" 0.1 \"donation\" \"seans outpost\"")
+        + HelpExampleCli ("sendtoname", "\"foobar\" 0.1 \"\" \"\" true")
+        + HelpExampleRpc ("sendtoname", "\"foobar\", 0.1, \"donation\", \"seans outpost\"")
+      );
+
+  if (IsInitialBlockDownload ())
+    throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD,
+                       "Namecoin is downloading blocks...");
+
+  LOCK2 (cs_main, pwalletMain->cs_wallet);
+
+  const std::string nameStr = params[0].get_str ();
+  const valtype name = ValtypeFromString (nameStr);
+
+  CNameData data;
+  if (!pcoinsTip->GetName (name, data))
+    {
+      std::ostringstream msg;
+      msg << "name not found: '" << nameStr << "'";
+      throw JSONRPCError (RPC_INVALID_ADDRESS_OR_KEY, msg.str ());
+    }
+  if (data.isExpired ())
+    throw JSONRPCError (RPC_INVALID_ADDRESS_OR_KEY, "the name is expired");
+
+  /* The code below is strongly based on sendtoaddress.  Make sure to
+     keep it in sync.  */
+
+  // Amount
+  const CAmount nAmount = AmountFromValue (params[1]);
+
+  // Wallet comments
+  CWalletTx wtx;
+  if (params.size () > 2 && params[2].type () != json_spirit::null_type
+        && !params[2].get_str ().empty ())
+    wtx.mapValue["comment"] = params[2].get_str ();
+  if (params.size () > 3 && params[3].type () != json_spirit::null_type
+        && !params[3].get_str ().empty ())
+    wtx.mapValue["to"] = params[3].get_str ();
+
+  bool fSubtractFeeFromAmount = false;
+  if (params.size () > 4)
+    fSubtractFeeFromAmount = params[4].get_bool ();
+
+  EnsureWalletIsUnlocked ();
+
+  SendMoneyToScript (data.getAddress (), NULL,
+                     nAmount, fSubtractFeeFromAmount, wtx);
 
   return wtx.GetHash ().GetHex ();
 }
